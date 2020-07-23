@@ -1,0 +1,91 @@
+fn t {tinygo flash -target itsybitsy-m4 . && echo flashed && sleep 2 && picocom /dev/ttyACM0}
+
+
+3 * MCP23017 I/O multiplexer
+2 * OLED 128x64 bit displays
+5 * buttons
+
+ItsyBitsy M4:
+	192KB RAM
+	512KB Flash
+	2MB SPI flash (can only write from inside the board)
+
+I2C devices:
+
+	0x20	MCP23017
+	0x21
+	0x22
+	0x3c
+	0x3d
+
+Pins
+	0	black button
+	1	white button
+	2	red button
+	3	green button
+	4	blue button
+	13	red LED
+	?	DotStar LED
+
+MCP23017:
+	C++ lib:
+		https://github.com/adafruit/Adafruit-MCP23017-Arduino-Library
+
+	digital output:
+		pinMode(pin, OUTPUT)
+		digitalWrite(pin, HIGH or LOW)
+
+	interrupt:
+
+		https://github.com/adafruit/Adafruit-MCP23017-Arduino-Library/blob/master/examples/interrupt/interrupt.ino
+
+		sleep until interrupt:
+		LowPower.powerDown(SLEEP_1S, ADC_OFF, BOD_OFF);
+
+
+	// unused (so far) interrupt configuration stuff:
+
+	type InterruptConfig struct {
+		// TODO document these fields (and maybe rename)
+		Mirroring bool
+		OpenDrain bool
+		Polarity bool
+	}
+
+	func (d *Device) ConfigureInterrupts(port Port, config InterruptConfig)
+
+	type InterruptMode uint8
+
+	const (
+		// Interrupt on any change.
+		Change InterruptMode = iota
+		// Interrupt on falling edge.
+		Falling
+		// Interrupt on rising edge.
+		Rising
+	)
+
+	// ConfigureInterruptPin configures the interrupt behavior of the
+	// given pin.
+	func (d *Device) ConfigureInterruptPin(pin uint8, interruptMode InterruptMode) error
+
+	var ErrNoInterrupt = errors.New("no interrupt has occurred")
+
+	// InterruptInfo returns information on the pin that caused
+	// the last interrupt and its value at the time of the interrupt.
+	// If there was no interrupt, it returns ErrNoInterrupt.
+	func (d *Device) InterruptInfo() (pin uint8, value bool, err error)
+
+
+
+pinMode(pin, INPUT or OUTPUT)
+digitalWrite(pin, HIGH or LOW)
+
+
+interrupt:
+
+	https://github.com/adafruit/Adafruit-MCP23017-Arduino-Library/blob/master/examples/interrupt/interrupt.ino
+
+	sleep until interrupt:
+	LowPower.powerDown(SLEEP_1S, ADC_OFF, BOD_OFF);
+
