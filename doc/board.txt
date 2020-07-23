@@ -2,7 +2,7 @@ fn t {tinygo flash -target itsybitsy-m4 . && echo flashed && sleep 2 && picocom 
 
 
 3 * MCP23017 I/O multiplexer
-2 * OLED 128x64 bit displays
+2 * OLED 128x64 bit displays https://cdn-shop.adafruit.com/datasheets/SSD1306.pdf
 5 * buttons
 
 ItsyBitsy M4:
@@ -12,11 +12,11 @@ ItsyBitsy M4:
 
 I2C devices:
 
-	0x20	MCP23017
-	0x21
-	0x22
-	0x3c
-	0x3d
+	0x20	MCP23017	relay bank 0 and 1
+	0x21 MCP23017	relay bank 2
+	0x22	MCP23017	buttons
+	0x3c SSD1306	display 1
+	0x3d SSD1306	display 2
 
 Pins
 	0	black button
