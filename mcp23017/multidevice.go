@@ -1,7 +1,34 @@
 package mcp23017
 
+// All is a convenience value that represents all pins high (or all mask bits one).
+var All = PinSlice{0xffff}
+
+// Devices holds a slice of devices that can be treated as one
+// contiguous set of devices. Earlier entries in the slice have
+// lower-numbered pins, so index 0 holds pins 0-7, index 1 holds
+// pins 8-15, etc.
 type Devices []*Device
 
+// NewI2CDevices returns a Devices slice holding the Device values
+// for all the given addresses on the given bus.
+// When more than one bus is in use, create the slice yourself.
+func NewI2CDevices(bus I2C, addrs ...uint8) (Devices, error) {
+	devs := make(Devices, len(addrs))
+	for i, addr := range addrs {
+		dev, err := NewI2C(bus, addr)
+		if err != nil {
+			// TODO return a more informative error.
+			return nil, err
+		}
+		devs[i] = dev
+	}
+	return devs, nil
+}
+
+// SetModes sets the pin modes of all the pins on all the devices in devs.
+// If there are less entries in modes than there are pins, the
+// last entry is replicated to all of them (or PinMode(0) if modes
+// is empty).
 func (devs Devices) SetModes(modes []PinMode) error {
 	var defaultModes []PinMode
 	if len(modes) > 0 {
@@ -22,6 +49,9 @@ func (devs Devices) SetModes(modes []PinMode) error {
 	return nil
 }
 
+// GetModes gets the pin modes from the devices.
+// It's OK if modes isn't the same length as all the pins:
+// extra entries will be left unchanged.
 func (devs Devices) GetModes(modes []PinMode) error {
 	for i, dev := range devs {
 		pinStart := i * PinCount
@@ -35,6 +65,7 @@ func (devs Devices) GetModes(modes []PinMode) error {
 	return nil
 }
 
+// Pin returns the pin for the given number.
 func (devs Devices) Pin(pin int) Pin {
 	if pin < 0 || pin >= len(devs)*PinCount {
 		panic("pin out of range")
@@ -42,6 +73,7 @@ func (devs Devices) Pin(pin int) Pin {
 	return devs[pin/PinCount].Pin(pin % PinCount)
 }
 
+// GetPins returns pin values for all the pins.
 func (devs Devices) GetPins(pins PinSlice) error {
 	for i, dev := range devs {
 		if i >= len(pins) {
@@ -56,6 +88,16 @@ func (devs Devices) GetPins(pins PinSlice) error {
 	return nil
 }
 
+// SetPins sets all the pins for which mask is high
+// to their respective values in pins.
+//
+// That is, it does the equivalent of:
+//
+// 	for i := 0; i < PinCount*len(devs); i++ {
+//		if mask.Get(i) {
+//			d.Pin(i).Set(pins.Get(i))
+//		}
+//	}
 func (devs Devices) SetPins(pins, mask PinSlice) error {
 	defaultPins := pins.extra()
 	defaultMask := mask.extra()
@@ -118,7 +160,10 @@ func (pins PinSlice) Low(pin int) {
 // populating additonal elements by replicating the
 // highest pin (mirroring the behavior of PinSlice.Get).
 func (pins PinSlice) Ensure(length int) PinSlice {
-	n := length / PinCount
+	if length == 0 {
+		return pins
+	}
+	n := length/PinCount + 1
 	if len(pins) >= n {
 		return pins
 	}

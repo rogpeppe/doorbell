@@ -1,6 +1,9 @@
 // Package mcp23017 implements a driver for the MCP23017
 // I2C port expander chip. See https://www.microchip.com/wwwproducts/en/MCP23017
 // for details of the interface.
+//
+// It also provides a way of joining several such devices into one logical
+// device (see the Devices type).
 package mcp23017
 
 import (
