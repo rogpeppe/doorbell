@@ -5,7 +5,6 @@ package mcp23017
 
 import (
 	"errors"
-	"machine"
 )
 
 const (
@@ -23,17 +22,18 @@ const (
 	// The following registers all refer to port A (except
 	// rIOCON with is port-agnostic).
 	// ORing them with portB makes them refer to port B.
-	rIODIR   = register(0x00) // I/O direction. 0=output; 1=input.
-	rIOPOL   = register(0x02) // Invert input values. 0=normal; 1=inverted.
-	rGPINTEN = register(0x04)
-	rDEFVAL  = register(0x06)
-	rINTCON  = register(0x08)
-	rIOCON   = register(0x0A)
-	rGPPU    = register(0x0C) // Pull up; 1=pull-up.
-	rINTF    = register(0x0E)
-	rINTCAP  = register(0x10)
-	rGPIO    = register(0x12) // GPIO pin values.
-	rOLAT    = register(0x14)
+	rIODIR        = register(0x00) // I/O direction. 0=output; 1=input.
+	rIOPOL        = register(0x02) // Invert input values. 0=normal; 1=inverted.
+	rGPINTEN      = register(0x04)
+	rDEFVAL       = register(0x06)
+	rINTCON       = register(0x08)
+	rIOCON        = register(0x0A)
+	rGPPU         = register(0x0C) // Pull up; 0=no pull-up; 1=pull-up.
+	rINTF         = register(0x0E)
+	rINTCAP       = register(0x10)
+	rGPIO         = register(0x12) // GPIO pin values.
+	rOLAT         = register(0x14)
+	registerCount = 0x16
 
 	portB = register(0x1)
 )
@@ -69,11 +69,17 @@ const (
 
 var ErrInvalidHWAddress = errors.New("invalid hardware address")
 
-// New returns a new MCP23017 device at the given I2C address.
+type i2c interface {
+	ReadRegister(addr uint8, r uint8, buf []byte) error
+	WriteRegister(addr uint8, r uint8, buf []byte) error
+}
+
+// New returns a new MCP23017 device at the given I2C address
+// on the given bus.
 // It returns ErrInvalidHWAddress if the address isn't possible for the device.
 //
 // By default all pins are configured as inputs.
-func NewI2C(bus machine.I2C, address uint8) (*Device, error) {
+func NewI2C(bus I2C, address uint8) (*Device, error) {
 	if address&hwAddressMask != hwAddress {
 		return nil, ErrInvalidHWAddress
 	}
@@ -81,17 +87,27 @@ func NewI2C(bus machine.I2C, address uint8) (*Device, error) {
 		bus:  bus,
 		addr: address,
 	}
-	_, err := d.readRegister(rGPIO)
+	pins, err := d.GetPins()
 	if err != nil {
 		return nil, err
 	}
+	d.pins = pins
 	return d, nil
 }
 
 // Device represents an MCP23017 device.
 type Device struct {
-	bus  machine.I2C
+	// TODO would it be good to have a mutex here so that independent goroutines
+	// could change pins without needing to do the locking themselves?
+
+	// bus holds the reference the I2C bus that the device lives on.
+	// It's an interface so that we can write tests for it.
+	bus  i2c
 	addr uint8
+	// pins caches the most recent pin values that have been set.
+	// This enables us to change individual pin values without
+	// doing a read followed by a write.
+	pins Pins
 }
 
 // GetPins reads all 16 pins from ports A and B.
@@ -99,10 +115,30 @@ func (d *Device) GetPins() (Pins, error) {
 	return d.readRegisterAB(rGPIO)
 }
 
-// SetPins writes all the pins at once. The bits
-// are laid out as for GetPins.
-func (d *Device) SetPins(pins Pins) error {
-	return d.writeRegisterAB(rGPIO, pins)
+// SetPins sets all the pins for which mask is high
+// to their respective values in pins.
+//
+// That is, it does the equivalent of:
+//
+// 	for i := 0; i < PinCount; i++ {
+//		if mask.Get(i) {
+//			d.Pin(i).Set(pins.Get(i))
+//		}
+//	}
+func (d *Device) SetPins(pins, mask Pins) error {
+	if mask == 0 {
+		return nil
+	}
+	newPins := (d.pins &^ mask) | (pins & mask)
+	if newPins == d.pins {
+		return nil
+	}
+	err := d.writeRegisterAB(rGPIO, newPins)
+	if err != nil {
+		return err
+	}
+	d.pins = newPins
+	return nil
 }
 
 // Pin returns a Pin representing the given pin number (from 0 to 15).
@@ -112,22 +148,33 @@ func (d *Device) Pin(pin int) Pin {
 	if pin < 0 || pin >= PinCount {
 		panic("pin out of range")
 	}
-	var port register
-	if pin > 7 {
-		port = portB
-	}
+	var mask Pins
+	mask.High(pin)
 	return Pin{
 		dev:  d,
-		port: port,
-		mask: uint8(1 << (pin & 0x7)),
+		mask: mask,
 		pin:  uint8(pin),
 	}
 }
 
 // SetAllModes sets the mode of all the pins in a single operation.
-func (d *Device) SetModes(modes *[PinCount]PinMode) error {
+// If len(modes) is less than PinCount, all remaining pins
+// will be set fo modes[len(modes)-1], or PinMode(0) if
+// modes is empty.
+//
+// If len(modes) is greater than PinCount, the excess entries
+// will be ignored.
+func (d *Device) SetModes(modes []PinMode) error {
+	defaultMode := PinMode(0)
+	if len(modes) > 0 {
+		defaultMode = modes[len(modes)-1]
+	}
 	var dir, pullup, invert Pins
-	for i, mode := range modes {
+	for i := 0; i < PinCount; i++ {
+		mode := defaultMode
+		if i < len(modes) {
+			mode = modes[i]
+		}
 		if mode&Direction == Input {
 			dir.High(i)
 		}
@@ -151,7 +198,9 @@ func (d *Device) SetModes(modes *[PinCount]PinMode) error {
 }
 
 // GetModes reads the modes of all the pins into modes.
-func (d *Device) GetModes(modes *[PinCount]PinMode) error {
+// It's OK if len(modes) is not PinCount - excess entries
+// will be left unset.
+func (d *Device) GetModes(modes []PinMode) error {
 	dir, err := d.readRegisterAB(rIODIR)
 	if err != nil {
 		return err
@@ -163,6 +212,9 @@ func (d *Device) GetModes(modes *[PinCount]PinMode) error {
 	invert, err := d.readRegisterAB(rIOPOL)
 	if err != nil {
 		return err
+	}
+	if len(modes) > PinCount {
+		modes = modes[:PinCount]
 	}
 	for i := range modes {
 		mode := Output
@@ -178,19 +230,6 @@ func (d *Device) GetModes(modes *[PinCount]PinMode) error {
 		modes[i] = mode
 	}
 	return nil
-}
-
-func (d *Device) readRegister(r register) (uint8, error) {
-	var buf [1]byte
-	if err := d.bus.ReadRegister(d.addr, uint8(r), buf[:]); err != nil {
-		return 0, err
-	}
-	return buf[0], nil
-}
-
-func (d *Device) writeRegister(r register, val uint8) error {
-	buf := [1]byte{val}
-	return d.bus.WriteRegister(d.addr, uint8(r), buf[:])
 }
 
 func (d *Device) writeRegisterAB(r register, val Pins) error {
@@ -214,10 +253,8 @@ func (d *Device) readRegisterAB(r register) (Pins, error) {
 
 // Pin represents a single GPIO pin on the device.
 type Pin struct {
-	// mask holds the mask of the pin within its specific register.
-	mask uint8
-	// port holds the register bank to use (portB or 0)
-	port register
+	// mask holds the mask of the pin.
+	mask Pins
 	// pin holds the actual pin number.
 	pin uint8
 	dev *Device
@@ -225,17 +262,14 @@ type Pin struct {
 
 // Set sets the pin to the given value.
 func (p Pin) Set(value bool) error {
-	r := rGPIO | p.port
-	v, err := p.dev.readRegister(r)
-	if err != nil {
-		return err
-	}
+	// TODO currently this always writes both registers when
+	// technically it only needs to write one. We could potentially
+	// optimize that.
 	if value {
-		v |= p.mask
+		return p.dev.SetPins(^Pins(0), p.mask)
 	} else {
-		v &^= p.mask
+		return p.dev.SetPins(0, p.mask)
 	}
-	return p.dev.writeRegister(r, v)
 }
 
 // High is short for p.Set(true).
@@ -245,16 +279,17 @@ func (p Pin) High() error {
 
 // High is short for p.Set(false).
 func (p Pin) Low() error {
-	return p.Set(true)
+	return p.Set(false)
 }
 
 // Get returns the current value of the given pin.
 func (p Pin) Get() (bool, error) {
-	v, err := p.dev.readRegister(rGPIO | p.port)
+	// TODO this reads 2 registers when we could read just one.
+	pins, err := p.dev.GetPins()
 	if err != nil {
 		return false, err
 	}
-	return v&p.mask != 0, nil
+	return pins&p.mask != 0, nil
 }
 
 // SetMode configures the pin to the given mode.
@@ -263,18 +298,18 @@ func (p Pin) SetMode(mode PinMode) error {
 	// read/write pattern but setting pin modes isn't an
 	// operation that's likely to need to be efficient, so
 	// use less code and use Get/SetModes directly.
-	var modes [PinCount]PinMode
-	if err := p.dev.GetModes(&modes); err != nil {
+	modes := make([]PinMode, PinCount)
+	if err := p.dev.GetModes(modes); err != nil {
 		return err
 	}
 	modes[p.pin] = mode
-	return p.dev.SetModes(&modes)
+	return p.dev.SetModes(modes)
 }
 
 // GetMode returns the mode of the pin.
 func (p Pin) GetMode() (PinMode, error) {
-	var modes [PinCount]PinMode
-	if err := p.dev.GetModes(&modes); err != nil {
+	modes := make([]PinMode, PinCount)
+	if err := p.dev.GetModes(modes); err != nil {
 		return 0, err
 	}
 	return modes[p.pin], nil
