@@ -70,9 +70,14 @@ const (
 	Invert = PinMode(4)
 )
 
+// ErrInvalidHWAddress is returned when the hardware address
+// of the device is not valid (only some bits can be set by the
+// address pins).
 var ErrInvalidHWAddress = errors.New("invalid hardware address")
 
-type i2c interface {
+// I2C represents an I2C bus. It is notably implemented by the
+// machine.I2C type.
+type I2C interface {
 	ReadRegister(addr uint8, r uint8, buf []byte) error
 	WriteRegister(addr uint8, r uint8, buf []byte) error
 }
@@ -105,7 +110,7 @@ type Device struct {
 
 	// bus holds the reference the I2C bus that the device lives on.
 	// It's an interface so that we can write tests for it.
-	bus  i2c
+	bus  I2C
 	addr uint8
 	// pins caches the most recent pin values that have been set.
 	// This enables us to change individual pin values without
