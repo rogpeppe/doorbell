@@ -153,7 +153,6 @@ func (t *Timer) Stop() {
 }
 
 // Close closes the timer, which should not be used afterwards.
-// Close must not be called more than once.
 func (t *Timer) Close() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
