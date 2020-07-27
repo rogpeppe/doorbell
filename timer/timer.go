@@ -96,7 +96,7 @@ func (t *Timer) Reset(d time.Duration) {
 
 func (t *Timer) sleeper(wakeup time.Time) {
 	dt := time.Until(wakeup)
-	time.Sleep(dt)
+	sleep(dt)
 	for {
 		t.mu.Lock()
 		t.removeWakeTime(wakeup)
@@ -122,7 +122,15 @@ func (t *Timer) sleeper(wakeup time.Time) {
 				return
 			}
 		}
-		time.Sleep(time.Until(wakeup))
+		sleep(time.Until(wakeup))
+	}
+}
+
+// sleep works around a bug where sleeping for a negative
+// duration hangs up forever.
+func sleep(dt time.Duration) {
+	if dt > 0 {
+		time.Sleep(dt)
 	}
 }
 
