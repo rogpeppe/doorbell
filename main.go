@@ -59,6 +59,8 @@ var solenoidPinNumbers = []uint8{
 	7,
 }
 
+var numSolenoids = len(solenoidPinNumbers)
+
 // solenoidDuration is the amount of time to pulse the
 // solenoid relay for to make the sound.
 const solenoidDuration = 200 * time.Millisecond
@@ -146,6 +148,26 @@ func (b *buttonDev) buttons() mcp23017.Pins {
 	return buts & b.mask
 }
 
+var dingActions = []Action{{
+	Chan: noteC2,
+	On:   true,
+	When: 0,
+}, {
+	Chan: noteC2,
+	On:   false,
+	When: solenoidDuration,
+}}
+
+var dongActions = []Action{{
+	Chan: noteG2,
+	On:   true,
+	When: 0,
+}, {
+	Chan: noteG2,
+	On:   false,
+	When: solenoidDuration,
+}}
+
 func Doorbell(solenoids []mcp23017.Pin, doorButtons *buttonDev, tune []Action) {
 	println("starting doorbell")
 	pushed := make(chan mcp23017.Pins, 1)
@@ -164,9 +186,7 @@ func buttonPoller(doorButtons *buttonDev, pushed chan<- mcp23017.Pins) {
 		debouncer.Update(doorButtons.buttons())
 		if newState := debouncer.State(); newState != state {
 			state = newState
-			if state != 0 {
-				pushed <- state
-			}
+			pushed <- state
 		}
 		// TODO can we avoid continuously polling the
 		// buttons (e.g. by setting up an interrupt) ?
@@ -178,10 +198,16 @@ func player(solenoids []mcp23017.Pin, tune []Action, pushed <-chan mcp23017.Pins
 	println("in player")
 	timer := timer.NewTimer()
 	for {
-		println("waiting for button to be pushed")
+		// Wait for button to be pushed.
 		<-pushed
-		println("playing tune!")
-		Play(timer, solenoids, tune, nil)
+		// On first push and release, just do a two-note thing.
+		Play(timer, solenoids, dingActions, nil)
+
+		// Wait for all buttons to be released.
+		// TODO is this actually the right thing to do when other buttons are pushed?
+		for <-pushed != 0 {
+		}
+		Play(timer, solenoids, dongActions, nil)
 	}
 }
 
@@ -191,16 +217,30 @@ func player(solenoids []mcp23017.Pin, tune []Action, pushed <-chan mcp23017.Pins
 // being stopped by a button push.
 func Play(timer *timer.Timer, pins []mcp23017.Pin, seq []Action, stop <-chan struct{}) bool {
 	start := time.Now()
-	for _, a := range seq {
+	var active mcp23017.Pins
+	for i, a := range seq {
 		if dt := time.Until(start.Add(a.When)); dt > 0 {
 			select {
 			case <-timer.After(dt):
 			case <-stop:
+				// We've been stopped; don't stop immediately but play out
+				// all the disable events so that we end up with a clean
+				// slate and we always activate solenoids for the correct time.
+				for _, a := range seq[i:] {
+					if active == 0 {
+						break
+					}
+					if !a.On {
+						pins[a.Chan].Low()
+						active.Low(int(a.Chan))
+					}
+				}
 				return true
 			}
 		}
 		println("channel ", a.Chan, a.On)
 		pins[a.Chan].Set(a.On)
+		active.Set(int(a.Chan), a.On)
 	}
 	return false
 }

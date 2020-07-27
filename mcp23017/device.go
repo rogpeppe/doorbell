@@ -97,6 +97,7 @@ func NewI2C(bus I2C, address uint8) (*Device, error) {
 	}
 	pins, err := d.GetPins()
 	if err != nil {
+		println("cannot get initial pins for mcp23017 device at address ", address)
 		return nil, err
 	}
 	d.pins = pins
