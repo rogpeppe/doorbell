@@ -85,7 +85,7 @@ func main() {
 	}
 	println("set modes etc")
 	data := readTuneData()
-	actions := SequenceForTune(16, data)
+	actions := SequenceForTune(numSolenoids, data)
 	Doorbell(solenoidPins, &buttonDev{
 		dev:  inputs,
 		mask: 1<<len(buttonPinNumbers) - 1,
@@ -94,29 +94,29 @@ func main() {
 
 // Note: channel, delay before activation (milliseconds, two bytes)
 var tuneData = []byte{
-	0, 4, 0,
-	1, 4, 0,
-	2, 4, 0,
-	3, 4, 0,
-	4, 4, 0,
-	5, 4, 0,
-	6, 4, 0,
-	7, 4, 0,
-	8, 4, 0,
-	9, 4, 0,
-	10, 4, 0,
-	11, 4, 0,
-	12, 4, 0,
-	13, 4, 0,
-	14, 4, 0,
-	15, 4, 0,
-	16, 4, 0,
-	17, 4, 0,
-	18, 4, 0,
-	19, 4, 0,
-	20, 4, 0,
-	21, 4, 0,
-	22, 4, 0,
+	0, 2, 0,
+	1, 2, 0,
+	2, 2, 0,
+	3, 2, 0,
+	4, 2, 0,
+	5, 2, 0,
+	6, 2, 0,
+	7, 2, 0,
+	8, 2, 0,
+	9, 2, 0,
+	10, 2, 0,
+	11, 2, 0,
+	12, 2, 0,
+	13, 2, 0,
+	14, 2, 0,
+	15, 2, 0,
+	16, 2, 0,
+	17, 2, 0,
+	18, 2, 0,
+	19, 2, 0,
+	20, 2, 0,
+	21, 2, 0,
+	22, 2, 0,
 	23, 0, 0,
 
 	//	noteD1, 0, 0,
@@ -198,26 +198,66 @@ func player(solenoids []mcp23017.Pin, tune []Action, pushed <-chan mcp23017.Pins
 	println("in player")
 	timer := timer.NewTimer()
 	for {
+		println("wait for button")
 		// Wait for button to be pushed.
 		<-pushed
+		println("button pushed")
 		// On first push and release, just do a two-note thing.
-		Play(timer, solenoids, dingActions, nil)
+		Play(timer, solenoids, dingActions, nil, nil)
 
-		// Wait for all buttons to be released.
-		// TODO is this actually the right thing to do when other buttons are pushed?
-		for <-pushed != 0 {
+		// Wait for all buttons to be released, but if they press the
+		// button for a long time, play a tune instead of the "dong" sound.
+		timer.Reset(750 * time.Millisecond)
+	buttonWait:
+		for {
+			select {
+			case state := <-pushed:
+				if state == 0 {
+					Play(timer, solenoids, dongActions, nil, nil)
+					break buttonWait
+				}
+				// One of the buttons is still pressed.
+				// TODO is this actually the right thing to do when other buttons are pushed?
+			case <-timer.C:
+				// The button's been pushed for a long time: start a tune playing.
+				stop := make(chan struct{})
+				done := make(chan struct{})
+			tuneLoop:
+				for {
+					go Play(timer, solenoids, tune, stop, done)
+					// Wait for all buttons to be released.
+					for <-pushed != 0 {
+					}
+					select {
+					case <-pushed:
+						// The button has been pushed again while the tune is playing,
+						// so stop the tune playing and head around the loop to
+						// start another tune.
+						select {
+						case stop <- struct{}{}:
+							<-done
+						case <-done:
+						}
+					case <-done:
+						// The tune has finished playing.
+						break tuneLoop
+					}
+				}
+			}
 		}
-		Play(timer, solenoids, dongActions, nil)
 	}
 }
 
 // Play plays the given sequence of actions, using the given
-// pins as channels.
-// It reports whether the tune was successfully played without
-// being stopped by a button push.
-func Play(timer *timer.Timer, pins []mcp23017.Pin, seq []Action, stop <-chan struct{}) bool {
+// pins as channels. It stops if it receives a value on the stop
+// channel.
+//
+// If done is non-nil, a value will be sent on it before Play
+// returns.
+func Play(timer *timer.Timer, pins []mcp23017.Pin, seq []Action, stop <-chan struct{}, done chan<- struct{}) {
 	start := time.Now()
 	var active mcp23017.Pins
+sequenceLoop:
 	for i, a := range seq {
 		if dt := time.Until(start.Add(a.When)); dt > 0 {
 			select {
@@ -235,14 +275,16 @@ func Play(timer *timer.Timer, pins []mcp23017.Pin, seq []Action, stop <-chan str
 						active.Low(int(a.Chan))
 					}
 				}
-				return true
+				break sequenceLoop
 			}
 		}
 		println("channel ", a.Chan, a.On)
 		pins[a.Chan].Set(a.On)
 		active.Set(int(a.Chan), a.On)
 	}
-	return false
+	if done != nil {
+		done <- struct{}{}
+	}
 }
 
 type actionsByTime []Action
