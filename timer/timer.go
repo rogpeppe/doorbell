@@ -104,6 +104,8 @@ func (t *Timer) sleeper(wakeup time.Time) {
 		isIdle := wakeup.IsZero()
 		if isIdle {
 			if t.idle >= maxIdle {
+				// Too many idle goroutines; stop this one.
+				t.mu.Unlock()
 				return
 			}
 			t.idle++
