@@ -95,8 +95,7 @@ func (t *Timer) Reset(d time.Duration) {
 }
 
 func (t *Timer) sleeper(wakeup time.Time) {
-	dt := time.Until(wakeup)
-	sleep(dt)
+	sleep(time.Until(wakeup))
 	for {
 		t.mu.Lock()
 		t.removeWakeTime(wakeup)
