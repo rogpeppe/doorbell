@@ -18,12 +18,13 @@ func main() {
 	sanityCheck()
 	iterations := 10
 	var d time.Duration
+	const timerDuration = time.Microsecond
 	for {
 		println("iterations", iterations)
 		timer := timer.NewTimer()
 		t0 := time.Now()
 		for i := 0; i < iterations; i++ {
-			timer.Reset(0)
+			timer.Reset(timerDuration)
 			<-timer.C
 		}
 		d = time.Since(t0)
@@ -34,7 +35,8 @@ func main() {
 		iterations *= 2
 	}
 	println("iterations ", iterations)
-	println("timer overhead: ", (d / time.Duration(iterations)).String())
+	println("sleep interval ", timerDuration.String())
+	println("time per op ", (d / time.Duration(iterations)).String())
 }
 
 func sanityCheck() {

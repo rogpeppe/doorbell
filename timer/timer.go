@@ -126,14 +126,6 @@ func (t *Timer) sleeper(wakeup time.Time) {
 	}
 }
 
-// sleep works around a bug where sleeping for a negative
-// duration hangs up forever.
-func sleep(dt time.Duration) {
-	if dt > 0 {
-		time.Sleep(dt)
-	}
-}
-
 // removeWakeTime removes the given time from the wakeTime
 // slice. Called with t.mu held.
 func (t *Timer) removeWakeTime(wakeup time.Time) {
@@ -223,4 +215,13 @@ func (t *Timer) firstWakeup() time.Time {
 		return time.Time{}
 	}
 	return t.wakeTimes[len(t.wakeTimes)-1]
+}
+
+// sleep works around a bug where sleeping for a negative
+// duration hangs up forever.
+// See https://github.com/tinygo-org/tinygo/issues/1268
+func sleep(dt time.Duration) {
+	if dt > 0 {
+		time.Sleep(dt)
+	}
 }

@@ -33,7 +33,7 @@ func BenchmarkRepeatedTimer(b *testing.B) {
 	defer timer.Close()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		timer.Reset(0)
+		timer.Reset(time.Microsecond)
 		<-timer.C
 	}
 }
