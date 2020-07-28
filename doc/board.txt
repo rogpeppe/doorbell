@@ -1,4 +1,9 @@
-fn t {tinygo flash -target itsybitsy-m4 . && echo flashed && sleep 2 && picocom /dev/ttyACM0}
+fn t {
+	if (~ $#* 0) {
+		*=.
+	}
+	tinygo flash -target itsybitsy-m4 $* && echo flashed && sleep 2 && picocom /dev/ttyACM0
+}
 
 
 3 * MCP23017 I/O multiplexer
@@ -6,6 +11,7 @@ fn t {tinygo flash -target itsybitsy-m4 . && echo flashed && sleep 2 && picocom 
 5 * buttons
 
 ItsyBitsy M4:
+	main chip datasheets: https://www.microchip.com/wwwproducts/en/ATSAMD51G19A
 	192KB RAM
 	512KB Flash
 	2MB SPI flash (can only write from inside the board)
