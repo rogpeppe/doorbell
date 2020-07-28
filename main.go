@@ -12,8 +12,11 @@ https://github.com/bgould/go-littlefs
 package main
 
 import (
+	"encoding/binary"
+	"math/rand"
 	"time"
 
+	cryptorand "github.com/rogpeppe/doorbell/crypto/rand"
 	"github.com/rogpeppe/doorbell/debounce"
 	"github.com/rogpeppe/doorbell/mcp23017"
 	"github.com/rogpeppe/doorbell/timer"
@@ -86,105 +89,55 @@ func main() {
 	println("set modes etc")
 	data := readTuneData()
 	actions := SequenceForTune(numSolenoids, data)
-	Doorbell(solenoidPins, &buttonDev{
-		dev:  inputs,
-		mask: 1<<len(buttonPinNumbers) - 1,
-	}, actions)
-}
-
-// Note: channel, delay before activation (milliseconds, two bytes)
-var tuneData = []byte{
-	0, 2, 0,
-	1, 2, 0,
-	2, 2, 0,
-	3, 2, 0,
-	4, 2, 0,
-	5, 2, 0,
-	6, 2, 0,
-	7, 2, 0,
-	8, 2, 0,
-	9, 2, 0,
-	10, 2, 0,
-	11, 2, 0,
-	12, 2, 0,
-	13, 2, 0,
-	14, 2, 0,
-	15, 2, 0,
-	16, 2, 0,
-	17, 2, 0,
-	18, 2, 0,
-	19, 2, 0,
-	20, 2, 0,
-	21, 2, 0,
-	22, 2, 0,
-	23, 0, 0,
-
-	//	noteD1, 0, 0,
-	//	noteD1, 2, 0,
-	//	noteA1, 2, 0,
-	//	noteA1, 2, 0,
-	//	noteB1, 1, 0,
-	//	noteCs2, 1, 0,
-	//	noteD2, 1, 0,
-	//	noteE2, 1, 0,
-	//	noteCs2, 1, 0,
-	//	noteB1, 1, 0,
-}
-
-func readTuneData() []byte {
-	return tuneData
+	Doorbell(DoorbellParams{
+		Solenoids: solenoidPins,
+		DoorButtons: &buttonDevice{
+			dev:  inputs,
+			mask: 1<<len(buttonPinNumbers) - 1,
+		},
+		Tune: actions,
+		Rand: newRandSource(),
+	})
 }
 
 type Pin = mcp23017.Pin
 
-type buttonDev struct {
+type buttonDevice struct {
 	dev  *mcp23017.Device
 	mask mcp23017.Pins
 }
 
-func (b *buttonDev) buttons() mcp23017.Pins {
+func (b *buttonDevice) buttons() mcp23017.Pins {
 	// Ignore error because we don't care enough.
 	buts, _ := b.dev.GetPins()
 	return buts & b.mask
 }
 
-var dingActions = []Action{{
-	Chan: noteC2,
-	On:   true,
-	When: 0,
-}, {
-	Chan: noteC2,
-	On:   false,
-	When: solenoidDuration,
-}}
+type DoorbellParams struct {
+	Solenoids   []mcp23017.Pin
+	DoorButtons *buttonDevice
+	Tune        []Action
+	Rand        *rand.Rand
+}
 
-var dongActions = []Action{{
-	Chan: noteG2,
-	On:   true,
-	When: 0,
-}, {
-	Chan: noteG2,
-	On:   false,
-	When: solenoidDuration,
-}}
-
-func Doorbell(solenoids []mcp23017.Pin, doorButtons *buttonDev, tune []Action) {
+func Doorbell(p DoorbellParams) {
 	println("starting doorbell")
 	pushed := make(chan mcp23017.Pins, 1)
-	go buttonPoller(doorButtons, pushed)
-	go player(solenoids, tune, pushed)
+	go buttonPoller(p.DoorButtons, pushed)
+	go player(p.Solenoids, p.Tune, pushed)
 	select {}
 }
 
 // buttonPoller continually polls the buttons and sends any changes
 // on pushed.
-func buttonPoller(doorButtons *buttonDev, pushed chan<- mcp23017.Pins) {
+func buttonPoller(doorButtons *buttonDevice, pushed chan<- mcp23017.Pins) {
 	println("in button poller")
 	var debouncer debounce.Debouncer
 	var state mcp23017.Pins
 	for {
 		debouncer.Update(doorButtons.buttons())
 		if newState := debouncer.State(); newState != state {
+
 			state = newState
 			pushed <- state
 		}
@@ -308,4 +261,17 @@ func fatal(args ...interface{}) {
 	}
 	println()
 	select {}
+}
+
+func newRandSource() *rand.Rand {
+	var seed int64
+	var buf [8]byte
+	// Use H/W random number seed by default, falling
+	// back to RTC if that's unavailable.
+	if _, err := cryptorand.Read(buf[:]); err != nil {
+		seed = time.Now().UnixNano()
+	} else {
+		seed = int64(binary.LittleEndian.Uint64(buf[:]))
+	}
+	return rand.New(rand.NewSource(seed))
 }

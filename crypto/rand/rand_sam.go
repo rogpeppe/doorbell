@@ -13,8 +13,9 @@ import (
 )
 
 var (
-	initOnce sync.Once
-	randc    = make(chan uint32, 8)
+	initOnce  sync.Once
+	randc     = make(chan uint32, 8)
+	readMutex sync.Mutex
 )
 
 func init() {
@@ -24,6 +25,11 @@ func init() {
 type hwReader struct{}
 
 func (hwReader) Read(buf []byte) (int, error) {
+	// We only allow a single reader at a time because otherwise
+	// there are possible race conditions between enabling
+	// and disabling the TRNG interrupt otherwise.
+	readMutex.Lock()
+	defer readMutex.Unlock()
 	var randData [4]byte
 	n := 0
 	for n < len(buf) {
@@ -86,7 +92,7 @@ func handleTRNG(interrupt.Interrupt) {
 		// can't be active at the same time.
 		canSend = len(randc) < cap(randc)
 	default:
-		// This shouldn't happen, as we only set the data-ready indication
+		// This shouldn't happen, as we only enable interrupts
 		// when there's room enough in the channel for the next value,
 		// but better to be sure so we don't block accidentally.
 	}
