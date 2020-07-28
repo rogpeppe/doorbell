@@ -14,7 +14,7 @@ import (
 
 var (
 	initOnce sync.Once
-	randc    chan uint32
+	randc    = make(chan uint32, 8)
 )
 
 func init() {
@@ -64,8 +64,6 @@ func getUint32(blocking bool) (uint32, bool) {
 }
 
 func setup() {
-	randc = make(chan uint32, 8)
-
 	// Enable Main Clock for TRNG.
 	sam.MCLK.APBCMASK.SetBits(sam.MCLK_APBCMASK_TRNG_)
 
