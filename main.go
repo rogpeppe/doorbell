@@ -19,6 +19,7 @@ import (
 	cryptorand "github.com/rogpeppe/doorbell/crypto/rand"
 	"github.com/rogpeppe/doorbell/debounce"
 	"github.com/rogpeppe/doorbell/mcp23017"
+	"github.com/rogpeppe/doorbell/sequence"
 	"github.com/rogpeppe/doorbell/timer"
 )
 
@@ -51,15 +52,15 @@ var solenoidPinNumbers = []uint8{
 	14,
 	15,
 
-	// Front right: 0x20 Port A
-	0,
-	1,
-	2,
-	3,
-	4,
-	5,
-	6,
+	// Front right: 0x20 Port A, reversed.
 	7,
+	6,
+	5,
+	4,
+	3,
+	2,
+	1,
+	0,
 }
 
 var numSolenoids = len(solenoidPinNumbers)
@@ -87,16 +88,18 @@ func main() {
 		fatal("cannot set modes: ", err.Error())
 	}
 	println("set modes etc")
-	data := readTuneData()
-	actions := SequenceForTune(numSolenoids, data)
+	tunes, err := readTunes()
+	if err != nil {
+		fatal("cannot read tunes: ", err.Error())
+	}
 	Doorbell(DoorbellParams{
 		Solenoids: solenoidPins,
 		DoorButtons: &buttonDevice{
 			dev:  inputs,
 			mask: 1<<len(buttonPinNumbers) - 1,
 		},
-		Tune: actions,
-		Rand: newRandSource(),
+		Tunes: tunes,
+		Rand:  newRandSource(),
 	})
 }
 
@@ -116,7 +119,7 @@ func (b *buttonDevice) buttons() mcp23017.Pins {
 type DoorbellParams struct {
 	Solenoids   []mcp23017.Pin
 	DoorButtons *buttonDevice
-	Tune        []Action
+	Tunes       [][]sequence.Action
 	Rand        *rand.Rand
 }
 
@@ -124,32 +127,14 @@ func Doorbell(p DoorbellParams) {
 	println("starting doorbell")
 	pushed := make(chan mcp23017.Pins, 1)
 	go buttonPoller(p.DoorButtons, pushed)
-	go player(p.Solenoids, p.Tune, pushed)
+	go player(p.Solenoids, p.Tunes, pushed, p.Rand)
 	select {}
 }
 
-// buttonPoller continually polls the buttons and sends any changes
-// on pushed.
-func buttonPoller(doorButtons *buttonDevice, pushed chan<- mcp23017.Pins) {
-	println("in button poller")
-	var debouncer debounce.Debouncer
-	var state mcp23017.Pins
-	for {
-		debouncer.Update(doorButtons.buttons())
-		if newState := debouncer.State(); newState != state {
-
-			state = newState
-			pushed <- state
-		}
-		// TODO can we avoid continuously polling the
-		// buttons (e.g. by setting up an interrupt) ?
-		time.Sleep(time.Millisecond)
-	}
-}
-
-func player(solenoids []mcp23017.Pin, tune []Action, pushed <-chan mcp23017.Pins) {
+func player(solenoids []mcp23017.Pin, tunes [][]sequence.Action, pushed <-chan mcp23017.Pins, rand *rand.Rand) {
 	println("in player")
 	timer := timer.NewTimer()
+	selection := newTuneSelection(tunes, rand)
 	for {
 		println("wait for button")
 		// Wait for button to be pushed.
@@ -175,9 +160,10 @@ func player(solenoids []mcp23017.Pin, tune []Action, pushed <-chan mcp23017.Pins
 				// The button's been pushed for a long time: start a tune playing.
 				stop := make(chan struct{})
 				done := make(chan struct{})
+				selection.reset()
 			tuneLoop:
 				for {
-					go Play(timer, solenoids, tune, stop, done)
+					go Play(timer, solenoids, selection.choose(), stop, done)
 					// Wait for all buttons to be released.
 					for <-pushed != 0 {
 					}
@@ -207,7 +193,7 @@ func player(solenoids []mcp23017.Pin, tune []Action, pushed <-chan mcp23017.Pins
 //
 // If done is non-nil, a value will be sent on it before Play
 // returns.
-func Play(timer *timer.Timer, pins []mcp23017.Pin, seq []Action, stop <-chan struct{}, done chan<- struct{}) {
+func Play(timer *timer.Timer, pins []mcp23017.Pin, seq []sequence.Action, stop <-chan struct{}, done chan<- struct{}) {
 	start := time.Now()
 	var active mcp23017.Pins
 sequenceLoop:
@@ -240,18 +226,30 @@ sequenceLoop:
 	}
 }
 
-type actionsByTime []Action
-
-func (s actionsByTime) Less(i, j int) bool {
-	return s[i].When < s[i].When
+// buttonPoller continually polls the buttons and sends any changes
+// on pushed.
+func buttonPoller(doorButtons *buttonDevice, pushed chan<- mcp23017.Pins) {
+	println("in button poller")
+	var debouncer debounce.Debouncer
+	var state mcp23017.Pins
+	for {
+		debouncer.Update(doorButtons.buttons())
+		if newState := debouncer.State(); newState != state {
+			state = newState
+			pushed <- state
+		}
+		// TODO can we avoid continuously polling the
+		// buttons (e.g. by setting up an interrupt) ?
+		time.Sleep(time.Millisecond)
+	}
 }
 
-func (s actionsByTime) Len() int {
-	return len(s)
-}
-
-func (s actionsByTime) Swap(i, j int) {
-	s[i], s[j] = s[j], s[i]
+func readTunes() ([][]sequence.Action, error) {
+	tunes := make([][]sequence.Action, len(tunesData))
+	for i, data := range tunesData {
+		tunes[i] = sequence.ActionsForTune(numSolenoids, data, solenoidDuration)
+	}
+	return tunes, nil
 }
 
 func fatal(args ...interface{}) {

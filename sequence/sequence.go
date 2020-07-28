@@ -1,4 +1,4 @@
-package main
+package sequence
 
 import (
 	"encoding/binary"
@@ -17,21 +17,21 @@ type Action struct {
 	When time.Duration
 }
 
-// SequenceForTune reads a sequence of channel activations (solenoid
-// pulses) from the following data format. Each entry holds a channel
-// number (1 byte) and the number of milliseconds to delay before
-// activating that channel (2 bytes, little endian).
+// ActionsForTune reads a sequence of channel activations (solenoid
+// pulses) from the following data format. Each entry holds a number
+// of milliseconds to delay (2 bytes, big endian) and a channel numer
+// to activate after the delay (1 byte).
 //
 // The returned actions will be sorted in time order.
-func SequenceForTune(chanCount int, data []byte) []Action {
+func ActionsForTune(chanCount int, data []byte, solenoidDuration time.Duration) []Action {
 	actions := make([]Action, 0, len(data)/3*2)
 	now := time.Duration(0)
 	for len(data) > 0 {
 		if len(data) < 3 {
 			return actions
 		}
-		channel := data[0]
-		duration := binary.BigEndian.Uint16(data[1:3])
+		duration := binary.BigEndian.Uint16(data[0:2])
+		channel := data[2]
 		data = data[3:]
 		now += time.Duration(duration) * time.Millisecond
 		if int(channel) >= chanCount {
@@ -50,4 +50,18 @@ func SequenceForTune(chanCount int, data []byte) []Action {
 	}
 	sort.Stable(actionsByTime(actions))
 	return actions
+}
+
+type actionsByTime []Action
+
+func (s actionsByTime) Less(i, j int) bool {
+	return s[i].When < s[j].When
+}
+
+func (s actionsByTime) Len() int {
+	return len(s)
+}
+
+func (s actionsByTime) Swap(i, j int) {
+	s[i], s[j] = s[j], s[i]
 }
