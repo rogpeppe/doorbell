@@ -97,11 +97,15 @@ func NewI2C(bus I2C, address uint8) (*Device, error) {
 	}
 	pins, err := d.GetPins()
 	if err != nil {
-		println("cannot get initial pins for mcp23017 device at address ", address)
-		return nil, err
+		return nil, errors.New("cannot initialize mcp23017 device at " + hex(address) + ": " + err.Error())
 	}
 	d.pins = pins
 	return d, nil
+}
+
+func hex(x uint8) string {
+	digits := "0123456789abcdef"
+	return "0x" + digits[x>>4:x>>4+1] + digits[x&0xf:x&0xf+1]
 }
 
 // Device represents an MCP23017 device.

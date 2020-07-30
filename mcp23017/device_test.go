@@ -1,6 +1,7 @@
 package mcp23017
 
 import (
+	"fmt"
 	"testing"
 
 	qt "github.com/frankban/quicktest"
@@ -159,4 +160,14 @@ func TestPins(t *testing.T) {
 	c.Assert(p, qt.Equals, Pins(0b110))
 	p.Low(1)
 	c.Assert(p, qt.Equals, Pins(0b100))
+}
+
+func TestInitWithError(t *testing.T) {
+	c := qt.New(t)
+	bus := newBus(c)
+	fdev := bus.addDevice(0x20)
+	fdev.Err = fmt.Errorf("some error")
+	dev, err := NewI2C(bus, 0x20)
+	c.Assert(err, qt.ErrorMatches, `cannot initialize mcp23017 device at 0x20: some error`)
+	c.Assert(dev, qt.IsNil)
 }
