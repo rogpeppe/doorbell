@@ -2,12 +2,7 @@ package debounce
 
 import (
 	"time"
-
-	"github.com/rogpeppe/doorbell/mcp23017"
 )
-
-// TODO we could use a more generic type for this, such as uint32.
-type Pins = mcp23017.Pins
 
 // TODO make this configurable.
 const debounceTime = 50 * time.Millisecond
@@ -17,39 +12,41 @@ const debounceTime = 50 * time.Millisecond
 // and use State to access the stable state.
 // The zero value of a Debouncer is OK to use.
 type Debouncer struct {
-	stableState Pins
+	stableState bool
 	// stable holds whether the current state is considered stable.
-	stable      bool
-	state       Pins
+	isStable      bool
+	// state holds the most recently updated state.
+	state       bool
+	// lastChanged holds the time that state changed
+	// most recently.
 	lastChanged time.Time
 }
 
 // State returns the most recently known stable state.
-func (d *Debouncer) State() Pins {
+func (d *Debouncer) State() bool {
 	return d.stableState
 }
 
 // Update updates the debouncer with the latest button state.
-func (d *Debouncer) Update(state Pins) {
+func (d *Debouncer) Update(state bool) {
 	d.updateAtTime(state, time.Now())
 }
 
-func (d *Debouncer) updateAtTime(state Pins, now time.Time) {
+func (d *Debouncer) updateAtTime(state bool, now time.Time) {
 	switch {
 	case state != d.state:
-		println("debounce state change ", state)
 		d.lastChanged = now
 		d.state = state
-		if d.stable {
+		if d.isStable {
 			// When a change happens after a period of stability,
 			// we want to generate an event immediately rather
 			// than adding the debounce latency, because we
 			// know that *something* has happened.
-			d.stable = false
+			d.isStable = false
 			d.stableState = state
 		}
 	case now.After(d.lastChanged.Add(debounceTime)):
-		d.stable = true
+		d.isStable = true
 		d.stableState = state
 	}
 }

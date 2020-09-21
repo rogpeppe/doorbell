@@ -64,6 +64,7 @@ var solenoidPinNumbers = []uint8{
 }
 
 var numSolenoids = len(solenoidPinNumbers)
+const numButtons = 5
 
 // solenoidDuration is the amount of time to pulse the
 // solenoid relay for to make the sound.
@@ -230,11 +231,16 @@ sequenceLoop:
 // on pushed.
 func buttonPoller(doorButtons *buttonDevice, pushed chan<- mcp23017.Pins) {
 	println("in button poller")
-	var debouncer debounce.Debouncer
+	var debouncers [numButtons]debounce.Debouncer
 	var state mcp23017.Pins
 	for {
-		debouncer.Update(doorButtons.buttons())
-		if newState := debouncer.State(); newState != state {
+		var newState mcp23017.Pins
+		for i := range debouncers {
+			debouncer := &debouncers[i]
+			debouncer.Update(doorButtons.buttons().Get(i))
+			newState.Set(i, debouncer.State())
+		}
+		if newState != state {
 			state = newState
 			pushed <- state
 		}

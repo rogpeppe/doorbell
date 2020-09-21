@@ -5,6 +5,8 @@ fn t {
 	tinygo flash -target itsybitsy-m4 $* && echo flashed && sleep 2 && picocom /dev/ttyACM0
 }
 
+Note: need to be a member of group dialout:
+	 sudo adduser rogpeppe dialout
 
 3 * MCP23017 I/O multiplexer
 2 * OLED 128x64 bit displays https://cdn-shop.adafruit.com/datasheets/SSD1306.pdf
